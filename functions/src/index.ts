@@ -11,7 +11,7 @@ export const helloWorld = functions.https.onRequest((_, response) => {
 admin.initializeApp();
 const firestore = admin.firestore();
 
-export const addCO2 = functions.https.onCall(async (data, _) => {
+export const addCO2 = functions.region('asia-northeast1').https.onCall(async (data, _) => {
   const co2 = data.co2 as Number;
   const nowTimestamp = admin.firestore
     .Timestamp.fromMillis(Date.now());
