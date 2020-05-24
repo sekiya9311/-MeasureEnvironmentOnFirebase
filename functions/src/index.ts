@@ -2,7 +2,14 @@ import * as admin from 'firebase-admin';
 import * as functions from 'firebase-functions';
 import * as line from '@line/bot-sdk';
 
+const NOW_TIMESTAMP = admin.firestore.Timestamp.now();
+
 const MEASURE_ITEMS = 'measure_items';
+const PREV_ALERT_TIME = 'prev_alert_time';
+
+const DANGER_CO2_VALUE = 800;
+const MILLI_SECONDS_OF_AN_HOUR = 3600000;
+
 
 const lineBotClient = new line.Client({
   channelAccessToken: functions.config().linebot.channelaccesstoken as string,
@@ -20,17 +27,56 @@ admin.initializeApp();
 const firestore = admin.firestore();
 
 export const addCO2 = functions.region('asia-northeast1').https.onCall(async (data, _) => {
-  const co2 = data.co2 as Number;
-  const nowTimestamp = admin.firestore
-    .Timestamp.fromMillis(Date.now());
+  const co2 = data.co2 as number;
   const addObj = {
     co2,
-    created_at: nowTimestamp
+    created_at: NOW_TIMESTAMP
   };
 
   await firestore
     .collection(MEASURE_ITEMS)
     .add(addObj);
+
+
+  if (co2 <= DANGER_CO2_VALUE) {
+    return;
+  }
+  const needAlert = async (curCo2: number): Promise<boolean> => {
+    const modifiedCo2 = Math.floor(curCo2 / 100) * 100;
+    const prevAlertTimeCollection
+      = firestore.collection(PREV_ALERT_TIME);
+    const prevAlertTime = await prevAlertTimeCollection.get();
+    if (prevAlertTime.empty) {
+      await prevAlertTimeCollection.add({
+        at: NOW_TIMESTAMP,
+        co2: modifiedCo2
+      });
+      return true;
+    }
+    const prevAlertTimeDocSnapshot = prevAlertTime.docs[0];
+    const prevAlertTimeDocSnapshotData = prevAlertTimeDocSnapshot.data();
+    const prevAt = prevAlertTimeDocSnapshotData.at as admin.firestore.Timestamp;
+    const spanOfPrevAlert = NOW_TIMESTAMP.toDate().getTime() - prevAt.toDate().getTime();
+    if (spanOfPrevAlert < MILLI_SECONDS_OF_AN_HOUR) {
+      return false;
+    }
+    
+    await prevAlertTimeCollection.doc(prevAlertTimeDocSnapshot.id).update({
+        at: NOW_TIMESTAMP,
+        co2: modifiedCo2
+    });
+    return true;
+  }
+  if (!await needAlert(co2)) {
+    return;
+  }
+
+  const msg = `Now co2 value is over ${DANGER_CO2_VALUE} [ppm] !!` + '\n'
+    + `Current value is ${co2} [ppm]`;
+  await lineBotClient.broadcast({
+    type: 'text',
+    text: msg
+  });
 });
 
 export const lineBot = functions.region('asia-northeast1').https.onRequest((req, resp) => {
