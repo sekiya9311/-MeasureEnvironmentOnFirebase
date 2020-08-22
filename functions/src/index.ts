@@ -6,6 +6,7 @@ const NOW_TIMESTAMP = admin.firestore.Timestamp.now();
 
 const MEASURE_ITEMS = 'measure_items';
 const PREV_ALERT_TIME = 'prev_alert_time';
+const CURRENT_MEASURE = 'current_measure';
 
 const DANGER_CO2_VALUE = 800;
 const MILLI_SECONDS_OF_AN_HOUR = 3600000;
@@ -37,6 +38,16 @@ export const addCO2 = functions.region('asia-northeast1').https.onCall(async (da
     .collection(MEASURE_ITEMS)
     .add(addObj);
 
+  {
+    const currentMeasureCollection = firestore.collection(CURRENT_MEASURE);
+    const currentMeasure = await currentMeasureCollection.get();
+    if (currentMeasure.empty) {
+      await currentMeasureCollection.add(addObj);
+    } else {
+      const snapshot = currentMeasure.docs[0];
+      await currentMeasureCollection.doc(snapshot.id).update(addObj);
+    }
+  }
 
   if (co2 <= DANGER_CO2_VALUE) {
     return;
@@ -102,11 +113,7 @@ export const lineBot = functions.region('asia-northeast1').https.onRequest((req,
     }
 
     if (message.text === 'now') {
-      const snapshot = await firestore
-        .collection(MEASURE_ITEMS)
-        .orderBy('created_at', 'desc')
-        .limit(1)
-        .get();
+      const snapshot = await firestore.collection(CURRENT_MEASURE).get();
       if (snapshot.empty) {
         return respTextMessage('data is nothing...', event);
       }
@@ -123,5 +130,7 @@ export const lineBot = functions.region('asia-northeast1').https.onRequest((req,
   });
 
   return Promise.all(res).
-    then(_ => resp.status(200).send('OK'));
+    then(async (_) => {
+      resp.status(200).send('OK');
+    });
 });
